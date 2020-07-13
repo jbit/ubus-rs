@@ -1,0 +1,12 @@
+[package]
+name = "ubus"
+version = "0.1.0"
+authors = ["James Lee <jbit@jbit.net>"]
+edition = "2018"
+
+[features]
+default = []
+no_std = []
+
+[dependencies]
+storage_endian = { git = "https://github.com/jbit/storage_endian" }
