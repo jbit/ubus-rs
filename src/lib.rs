@@ -82,38 +82,46 @@ macro_rules! valid_data {
     }};
 }
 
-mod no {
-    #[derive(Debug)]
-    pub struct IO(());
+#[derive(Debug)]
+pub enum NoIO {}
+impl core::fmt::Display for NoIO {
+    fn fmt(&self, _f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        unreachable!()
+    }
 }
 
 #[derive(Debug)]
-pub enum Error<T = no::IO> {
+pub enum Error<T = NoIO> {
     IO(T),
     InvalidData(&'static str),
     Status(i32),
 }
 
-impl<T: core::fmt::Debug> core::fmt::Display for Error<T> {
+impl<T: core::fmt::Display> core::fmt::Display for Error<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        core::fmt::Debug::fmt(self, f)
+        use Error::*;
+        match self {
+            IO(e) => write!(f, "IO Error: {}", e),
+            InvalidData(e) => write!(f, "Invalid Data: {}", e),
+            Status(e) => write!(f, "Ubus Status: {}", e),
+        }
     }
 }
 
-impl<T> From<core::convert::Infallible> for Error<T> {
-    fn from(_: core::convert::Infallible) -> Self {
-        unreachable!()
-    }
-}
-
-impl<T: IOError> From<Error<no::IO>> for Error<T> {
-    fn from(e: Error<no::IO>) -> Self {
+impl<T: IOError> From<Error<NoIO>> for Error<T> {
+    fn from(e: Error<NoIO>) -> Self {
         use Error::*;
         match e {
             IO(_) => unreachable!(),
             InvalidData(v) => InvalidData(v),
             Status(v) => Status(v),
         }
+    }
+}
+
+impl<T> From<core::convert::Infallible> for Error<T> {
+    fn from(_: core::convert::Infallible) -> Self {
+        unreachable!()
     }
 }
 
