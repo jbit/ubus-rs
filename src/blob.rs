@@ -7,12 +7,13 @@ use storage_endian::BEu32;
 #[derive(Copy, Clone)]
 pub struct BlobTag(BEu32);
 impl BlobTag {
+    pub const SIZE: usize = size_of::<Self>();
     const ID_MASK: u32 = 0x7f;
     const ID_SHIFT: u32 = 24;
     const LEN_MASK: u32 = 0xff_ff_ff;
     const EXTENDED_BIT: u32 = 1 << 31;
-    const SIZE: usize = size_of::<Self>();
     const ALIGNMENT: usize = align_of::<Self>();
+
     /// Create BlobTag from a byte array
     pub fn from_bytes(bytes: [u8; Self::SIZE]) -> Self {
         unsafe { transmute(bytes) }
@@ -22,20 +23,20 @@ impl BlobTag {
         u32::from((self.0 >> Self::ID_SHIFT) & Self::ID_MASK)
     }
     /// Total number of bytes this blob contains (header + data)
-    pub fn len(&self) -> usize {
+    pub fn size(&self) -> usize {
         u32::from(self.0 & Self::LEN_MASK) as usize
     }
     /// Number of padding bytes between this blob and the next blob
     fn padding(&self) -> usize {
-        Self::ALIGNMENT.wrapping_sub(self.len()) & (Self::ALIGNMENT - 1)
+        Self::ALIGNMENT.wrapping_sub(self.size()) & (Self::ALIGNMENT - 1)
     }
     /// Number of bytes to the next tag
     fn next_tag(&self) -> usize {
-        self.len() + self.padding()
+        self.size() + self.padding()
     }
     /// Total number of bytes following the tag (extended header + data)
     pub fn inner_len(&self) -> usize {
-        self.len().saturating_sub(Self::SIZE)
+        self.size().saturating_sub(Self::SIZE)
     }
     /// Is this an "extended" blob
     pub fn is_extended(&self) -> bool {
@@ -43,12 +44,12 @@ impl BlobTag {
     }
     /// Does this blob look valid
     pub fn is_valid(&self) -> bool {
-        self.len() >= Self::SIZE
+        self.size() >= Self::SIZE
     }
 }
 impl core::fmt::Debug for BlobTag {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        let (id, len) = (self.id(), self.len());
+        let (id, len) = (self.id(), self.size());
         let extended = if self.is_extended() { ", extended" } else { "" };
         write!(f, "BlobTag(id={:?}, len={}{})", id, len, extended)
     }
@@ -62,14 +63,18 @@ pub struct Blob<'a> {
 }
 
 impl<'a> Blob<'a> {
-    fn from_bytes(data: &'a [u8]) -> Option<Self> {
+    pub fn from_bytes(data: &'a [u8]) -> Option<Self> {
         if data.len() < BlobTag::SIZE {
             return None;
         }
-
         // Read the blob's tag
         let (tag, data) = data.split_at(BlobTag::SIZE);
         let tag = BlobTag::from_bytes(tag.try_into().unwrap());
+
+        Self::from_tag_and_data(tag, data)
+    }
+
+    pub fn from_tag_and_data(tag: BlobTag, data: &'a [u8]) -> Option<Self> {
         if !tag.is_valid() || (data.len() < tag.inner_len()) {
             return None; // Actually an error!
         }
@@ -134,27 +139,33 @@ impl<'a> TryInto<&'a str> for Blob<'a> {
     }
 }
 
-pub struct BlobIter<'a> {
+use core::marker::PhantomData;
+
+pub struct BlobIter<'a, T> {
     data: &'a [u8],
+    _phantom: PhantomData<T>,
 }
-impl<'a> BlobIter<'a> {
+impl<'a, T> BlobIter<'a, T> {
     pub fn new(data: &'a [u8]) -> Self {
-        Self { data }
+        Self {
+            data,
+            _phantom: PhantomData,
+        }
     }
 }
-impl<'a> Iterator for BlobIter<'a> {
-    type Item = Blob<'a>;
-    fn next(&mut self) -> Option<Blob<'a>> {
+impl<'a, T: From<Blob<'a>>> Iterator for BlobIter<'a, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
         if let Some(blob) = Blob::from_bytes(self.data) {
             // Advance the internal pointer to the next tag
             self.data = &self.data[blob.tag.next_tag()..];
-            Some(blob)
+            Some(blob.into())
         } else {
             None
         }
     }
 }
-impl core::fmt::Debug for BlobIter<'_> {
+impl<T> core::fmt::Debug for BlobIter<'_, T> {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(f, "BlobIter")
     }

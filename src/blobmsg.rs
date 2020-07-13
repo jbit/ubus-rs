@@ -16,8 +16,8 @@ values!(pub BlobMsgType(u32) {
 
 #[derive(Debug)]
 pub enum BlobMsgData<'a> {
-    Array(BlobMsgIter<'a>),
-    Table(BlobMsgIter<'a>),
+    Array(BlobIter<'a, BlobMsg<'a>>),
+    Table(BlobIter<'a, BlobMsg<'a>>),
     String(&'a str),
     Int64(i64),
     Int32(i32),
@@ -35,8 +35,8 @@ pub struct BlobMsg<'a> {
 impl<'a> From<Blob<'a>> for BlobMsg<'a> {
     fn from(blob: Blob<'a>) -> Self {
         let data = match blob.tag.id().into() {
-            BlobMsgType::ARRAY => BlobMsgData::Array(BlobMsgIter::new(blob.data)),
-            BlobMsgType::TABLE => BlobMsgData::Table(BlobMsgIter::new(blob.data)),
+            BlobMsgType::ARRAY => BlobMsgData::Array(BlobIter::new(blob.data)),
+            BlobMsgType::TABLE => BlobMsgData::Table(BlobIter::new(blob.data)),
             BlobMsgType::STRING => BlobMsgData::String(blob.try_into().unwrap()),
             BlobMsgType::INT64 => BlobMsgData::Int64(blob.try_into().unwrap()),
             BlobMsgType::INT32 => BlobMsgData::Int32(blob.try_into().unwrap()),
@@ -57,27 +57,5 @@ impl core::fmt::Debug for BlobMsg<'_> {
         } else {
             write!(f, "BlobMsg({:?})", self.data)
         }
-    }
-}
-
-pub struct BlobMsgIter<'a> {
-    inner: BlobIter<'a>,
-}
-impl<'a> BlobMsgIter<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self {
-            inner: BlobIter::new(data),
-        }
-    }
-}
-impl<'a> Iterator for BlobMsgIter<'a> {
-    type Item = BlobMsg<'a>;
-    fn next(&mut self) -> Option<BlobMsg<'a>> {
-        self.inner.next().map(BlobMsg::from)
-    }
-}
-impl core::fmt::Debug for BlobMsgIter<'_> {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        write!(f, "BlobMsgIter")
     }
 }

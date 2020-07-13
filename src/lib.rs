@@ -77,20 +77,29 @@ impl<T: IO> Connection<T> {
 
     // Get next message from ubus channel (blocking!)
     pub fn next_message(&mut self) -> Result<Message, T::Error> {
-        let mut buffer = MessageHeader::EMPTY_BUFFER;
+        use core::convert::TryInto;
+        // Read in the message header and the following blob tag
+        let mut buffer = [0xffu8; MessageHeader::SIZE + BlobTag::SIZE];
         self.io.get(&mut buffer)?;
-        let header = MessageHeader::from(buffer);
 
+        let (header, tag) = buffer.split_at(MessageHeader::SIZE);
+
+        let header = MessageHeader::from_bytes(header.try_into().unwrap());
         assert_eq!(header.version, MessageVersion::CURRENT);
-        assert!(header.tag.is_valid());
 
-        // Truncate slice to length of data
-        let data = &mut self.buffer[..header.tag.inner_len()];
+        let tag = BlobTag::from_bytes(tag.try_into().unwrap());
+        assert!(tag.is_valid());
+
+        // Get a slice the size of the blobs data bytes (do we need to worry about padding here?)
+        let data = &mut self.buffer[..tag.inner_len()];
 
         // Receive data into slice
         self.io.get(data)?;
 
-        Ok(Message { header, data })
+        // Create the blob from our parts
+        let blob = Blob::from_tag_and_data(tag, data).unwrap();
+
+        Ok(Message { header, blob })
     }
 }
 

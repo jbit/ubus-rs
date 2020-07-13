@@ -1,5 +1,5 @@
-use crate::{Blob, BlobIter, BlobTag};
-use core::mem::size_of;
+use crate::Blob;
+use core::mem::{size_of, transmute};
 use storage_endian::{BEu16, BEu32};
 
 values!(pub MessageVersion(u8) {
@@ -45,12 +45,19 @@ pub struct MessageHeader {
     pub message: MessageType,
     pub sequence: BEu16,
     pub peer: BEu32,
-    pub tag: BlobTag,
 }
 
 impl MessageHeader {
-    pub const EMPTY_BUFFER: [u8; Self::SIZE] = [0xffu8; Self::SIZE];
     pub const SIZE: usize = size_of::<Self>();
+
+    /// Create MessageHeader from a byte array
+    pub fn from_bytes(buffer: [u8; Self::SIZE]) -> Self {
+        unsafe { transmute(buffer) }
+    }
+    // Dump out bytes of MessageHeader
+    pub fn to_bytes(self) -> [u8; Self::SIZE] {
+        unsafe { core::mem::transmute(self) }
+    }
 
     const OBJECT_EVENT: u32 = 1;
     const OBJECT_ACL: u32 = 2;
@@ -76,40 +83,21 @@ impl MessageHeader {
     const STATUS_CONNECTION_FAILED: u8 = 0x0a;
 }
 
-impl From<[u8; Self::SIZE]> for MessageHeader {
-    fn from(buffer: [u8; Self::SIZE]) -> Self {
-        unsafe { core::mem::transmute(buffer) }
-    }
-}
-impl Into<[u8; Self::SIZE]> for MessageHeader {
-    fn into(self) -> [u8; Self::SIZE] {
-        unsafe { core::mem::transmute(self) }
-    }
-}
-
 #[derive(Copy, Clone)]
 pub struct Message<'a> {
     pub header: MessageHeader,
-    pub data: &'a [u8],
-}
-
-impl<'a> IntoIterator for Message<'a> {
-    type Item = Blob<'a>;
-    type IntoIter = BlobIter<'a>;
-    fn into_iter(self) -> Self::IntoIter {
-        BlobIter::new(self.data)
-    }
+    pub blob: Blob<'a>,
 }
 
 impl core::fmt::Debug for Message<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
             f,
-            "Message({:?} seq={} peer={:08x}, len={})",
+            "Message({:?} seq={} peer={:08x}, size={})",
             self.header.message,
             self.header.sequence,
             self.header.peer,
-            self.header.tag.len()
+            self.blob.data.len()
         )
     }
 }

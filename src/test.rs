@@ -7,9 +7,12 @@ use std::{print, println};
 
 #[test]
 fn test() {
-    assert_eq!(size_of::<MessageHeader>(), 12);
+    assert_eq!(size_of::<MessageHeader>(), 8);
     assert_eq!(size_of::<MessageHeader>(), MessageHeader::SIZE);
     assert_eq!(align_of::<MessageHeader>(), 4);
+    assert_eq!(size_of::<BlobTag>(), 4);
+    assert_eq!(size_of::<BlobTag>(), BlobTag::SIZE);
+    assert_eq!(align_of::<BlobTag>(), 4);
 
     let (client, mut server) = UnixStream::pair().unwrap();
 
@@ -25,7 +28,7 @@ fn test() {
 
     while let Ok(message) = client.next_message() {
         println!("{:?}", message);
-        for blob in message {
+        for blob in BlobIter::<Blob>::new(message.blob.data) {
             match blob.tag.id().into() {
                 //MessageAttr::UNSPEC      => (),
                 MessageAttr::STATUS => {
@@ -48,7 +51,7 @@ fn test() {
                 ),
                 MessageAttr::SIGNATURE => {
                     println!("  signatures:");
-                    for signature in BlobMsgIter::new(blob.data) {
+                    for signature in BlobIter::<BlobMsg>::new(blob.data) {
                         print!("    {}( ", signature.name.unwrap());
                         if let BlobMsgData::Table(table) = signature.data {
                             for arg in table {
