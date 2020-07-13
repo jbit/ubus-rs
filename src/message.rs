@@ -1,4 +1,4 @@
-use crate::{Blob, BlobTag, Error, IO};
+use crate::{Blob, BlobIter, BlobMsg, BlobTag, Error, IO};
 use core::convert::TryInto;
 use core::mem::{size_of, transmute};
 use storage_endian::{BEu16, BEu32};
@@ -22,7 +22,7 @@ values!(pub MessageType(u8) {
     MONITOR         = 0x11,
 });
 
-values!(pub MessageAttr(u32) {
+values!(pub MessageAttrId(u32) {
     UNSPEC      = 0x00,
     STATUS      = 0x01,
     OBJPATH     = 0x02,
@@ -145,5 +145,44 @@ impl<'a> MessageBuilder<'a> {
 impl<'a> Into<&'a [u8]> for MessageBuilder<'a> {
     fn into(self) -> &'a [u8] {
         self.finish()
+    }
+}
+
+#[derive(Debug)]
+pub enum MessageAttr<'a> {
+    Status(i32),
+    ObjPath(&'a str),
+    ObjId(u32),
+    Method(&'a str),
+    ObjType(u32),
+    Signature(BlobIter<'a, BlobMsg<'a>>),
+    Data(&'a [u8]),
+    Target(u32),
+    Active(bool),
+    NoReply(bool),
+    Subscribers(BlobIter<'a, Blob<'a>>),
+    User(&'a str),
+    Group(&'a str),
+    Unknown(MessageAttrId, &'a [u8]),
+}
+
+impl<'a> From<Blob<'a>> for MessageAttr<'a> {
+    fn from(blob: Blob<'a>) -> Self {
+        match blob.tag.id().into() {
+            MessageAttrId::STATUS => MessageAttr::Status(blob.try_into().unwrap()),
+            MessageAttrId::OBJPATH => MessageAttr::ObjPath(blob.try_into().unwrap()),
+            MessageAttrId::OBJID => MessageAttr::ObjId(blob.try_into().unwrap()),
+            MessageAttrId::METHOD => MessageAttr::Method(blob.try_into().unwrap()),
+            MessageAttrId::OBJTYPE => MessageAttr::ObjType(blob.try_into().unwrap()),
+            MessageAttrId::SIGNATURE => MessageAttr::Signature(blob.try_into().unwrap()),
+            MessageAttrId::DATA => MessageAttr::Data(blob.try_into().unwrap()),
+            MessageAttrId::TARGET => MessageAttr::Target(blob.try_into().unwrap()),
+            MessageAttrId::ACTIVE => MessageAttr::Active(blob.try_into().unwrap()),
+            MessageAttrId::NO_REPLY => MessageAttr::NoReply(blob.try_into().unwrap()),
+            MessageAttrId::SUBSCRIBERS => MessageAttr::Subscribers(blob.try_into().unwrap()),
+            MessageAttrId::USER => MessageAttr::User(blob.try_into().unwrap()),
+            MessageAttrId::GROUP => MessageAttr::Group(blob.try_into().unwrap()),
+            id => MessageAttr::Unknown(id, blob.data),
+        }
     }
 }

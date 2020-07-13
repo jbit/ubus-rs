@@ -1,8 +1,27 @@
 use crate::*;
 
+#[derive(Copy, Clone)]
+pub struct ObjectResult<'a> {
+    pub path: &'a str,
+    pub id: u32,
+    pub ty: u32,
+}
+impl core::fmt::Debug for ObjectResult<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "{} @0x{:08x} type={:08x}", self.path, self.id, self.ty)
+    }
+}
+
+pub struct SignatureResult<'a> {
+    pub object: ObjectResult<'a>,
+    pub name: &'a str,
+    pub args: &'a mut dyn Iterator<Item = (&'a str, BlobMsgType)>,
+}
+
 pub struct Connection<T: IO> {
     io: T,
     peer: u32,
+    sequence: u16,
     buffer: [u8; 64 * 1024],
 }
 
@@ -12,6 +31,7 @@ impl<T: IO> Connection<T> {
         let mut new = Self {
             io,
             peer: 0,
+            sequence: 0,
             buffer: [0u8; 64 * 1024],
         };
 
@@ -37,5 +57,89 @@ impl<T: IO> Connection<T> {
 
     pub fn send(&mut self, message: MessageBuilder) -> Result<(), Error<T::Error>> {
         self.io.put(message.into())
+    }
+
+    pub fn lookup(
+        &mut self,
+        mut on_object: impl FnMut(ObjectResult),
+        mut on_signature: impl FnMut(SignatureResult),
+    ) -> Result<(), Error<T::Error>> {
+        self.sequence += 1;
+        let sequence = self.sequence.into();
+
+        let mut buffer = [0u8; 1024];
+        let message = MessageBuilder::new(
+            &mut buffer,
+            MessageHeader {
+                version: MessageVersion::CURRENT,
+                message: MessageType::LOOKUP,
+                sequence,
+                peer: 0.into(),
+            },
+        )
+        .unwrap();
+
+        self.send(message)?;
+
+        loop {
+            let message = self.next_message()?;
+            if message.header.sequence != sequence {
+                continue;
+            }
+
+            let mut attrs = BlobIter::<MessageAttr>::new(message.blob.data);
+
+            if message.header.message == MessageType::STATUS {
+                if let Some(MessageAttr::Status(status)) = attrs.next() {
+                    if status == 0 {
+                        return Ok(());
+                    } else {
+                        return Err(Error::Status(status));
+                    }
+                } else {
+                    return Err(Error::InvalidData("Invalid status message"));
+                }
+            }
+
+            if message.header.message != MessageType::DATA {
+                continue;
+            }
+
+            let mut obj_path: Option<&str> = None;
+            let mut obj_id: Option<u32> = None;
+            let mut obj_type: Option<u32> = None;
+            for attr in attrs {
+                match attr {
+                    MessageAttr::ObjPath(path) => obj_path = Some(path),
+                    MessageAttr::ObjId(id) => obj_id = Some(id),
+                    MessageAttr::ObjType(ty) => obj_type = Some(ty),
+                    MessageAttr::Signature(nested) => {
+                        let object = ObjectResult {
+                            path: obj_path.unwrap(),
+                            id: obj_id.unwrap(),
+                            ty: obj_type.unwrap(),
+                        };
+                        on_object(object);
+
+                        for signature in nested {
+                            if let BlobMsgData::Table(table) = signature.data {
+                                on_signature(SignatureResult {
+                                    object,
+                                    name: signature.name.unwrap(),
+                                    args: &mut table.map(|arg| {
+                                        if let BlobMsgData::Int32(typeid) = arg.data {
+                                            (arg.name.unwrap(), BlobMsgType::from(typeid as u32))
+                                        } else {
+                                            panic!()
+                                        }
+                                    }),
+                                });
+                            }
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        }
     }
 }

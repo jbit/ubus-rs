@@ -91,6 +91,7 @@ mod no {
 pub enum Error<T = no::IO> {
     IO(T),
     InvalidData(&'static str),
+    Status(i32),
 }
 
 impl<T: core::fmt::Debug> core::fmt::Display for Error<T> {
@@ -111,6 +112,7 @@ impl<T: IOError> From<Error<no::IO>> for Error<T> {
         match e {
             IO(_) => unreachable!(),
             InvalidData(v) => InvalidData(v),
+            Status(v) => Status(v),
         }
     }
 }

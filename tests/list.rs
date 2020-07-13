@@ -1,5 +1,3 @@
-use core::convert::TryInto;
-use core::mem::{align_of, size_of};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::{print, println};
@@ -7,114 +5,37 @@ use ubus::*;
 
 #[test]
 fn test() {
-    assert_eq!(size_of::<MessageHeader>(), 8);
-    assert_eq!(size_of::<MessageHeader>(), MessageHeader::SIZE);
-    assert_eq!(align_of::<MessageHeader>(), 4);
-    assert_eq!(size_of::<BlobTag>(), 4);
-    assert_eq!(size_of::<BlobTag>(), BlobTag::SIZE);
-    assert_eq!(align_of::<BlobTag>(), 4);
-
     let (client, mut server) = UnixStream::pair().unwrap();
 
-    server.write_all(TEST_HELLO).unwrap();
-
-    let mut connection = Connection::new(client).unwrap();
-
-    let mut buffer = [0u8; 1024];
-    let message = MessageBuilder::new(
-        &mut buffer,
-        MessageHeader {
-            version: MessageVersion::CURRENT,
-            message: MessageType::LOOKUP,
-            sequence: 1.into(),
-            peer: 0.into(),
-        },
-    )
-    .unwrap();
-
-    connection.send(message).unwrap();
-
-    let mut command = [0u8; 12];
-    server.read_exact(&mut command).unwrap();
-    assert_eq!(command, TEST_TX);
-
     std::thread::spawn(move || {
+        server.write_all(TEST_HELLO).unwrap();
+        let mut command = [0u8; 12];
+        server.read_exact(&mut command).unwrap();
+        assert_eq!(command, TEST_TX);
         for i in TEST_RX {
             server.write_all(i).unwrap();
         }
     });
 
-    while let Ok(message) = connection.next_message() {
-        println!("{:?}", message);
-        for blob in BlobIter::<Blob>::new(message.blob.data) {
-            match blob.tag.id().into() {
-                //MessageAttr::UNSPEC      => (),
-                MessageAttr::STATUS => {
-                    println!("  status={}", (blob.try_into() as Result<i32, _>).unwrap())
+    let mut connection = Connection::new(client).unwrap();
+
+    connection
+        .lookup(
+            |obj| {
+                println!("\n{:?}", obj);
+            },
+            |sig| {
+                print!("  {}(", sig.name);
+                for (name, ty) in sig.args {
+                    print!("{}: {:?}, ", name, ty);
                 }
-                MessageAttr::OBJPATH => println!(
-                    "  objpath={:?}",
-                    (blob.try_into() as Result<&str, _>).unwrap()
-                ),
-                MessageAttr::OBJID => println!(
-                    "  objid={:08x}",
-                    (blob.try_into() as Result<u32, _>).unwrap()
-                ),
-                MessageAttr::METHOD => {
-                    println!("  method={}", (blob.try_into() as Result<&str, _>).unwrap())
-                }
-                MessageAttr::OBJTYPE => println!(
-                    "  objtype={:08x}",
-                    (blob.try_into() as Result<u32, _>).unwrap()
-                ),
-                MessageAttr::SIGNATURE => {
-                    println!("  signatures:");
-                    for signature in BlobIter::<BlobMsg>::new(blob.data) {
-                        print!("    {}( ", signature.name.unwrap());
-                        if let BlobMsgData::Table(table) = signature.data {
-                            for arg in table {
-                                if let BlobMsgData::Int32(typeid) = arg.data {
-                                    print!(
-                                        "{}: {:?}, ",
-                                        arg.name.unwrap(),
-                                        BlobMsgType::from(typeid as u32)
-                                    );
-                                } else {
-                                    print!("{:?}", arg);
-                                }
-                            }
-                        } else {
-                            print!("{:?}", signature.data);
-                        }
-                        println!(")")
-                    }
-                }
-                //MessageAttr::DATA        => (),
-                MessageAttr::TARGET => println!(
-                    "  target={:08x}",
-                    (blob.try_into() as Result<u32, _>).unwrap()
-                ),
-                MessageAttr::ACTIVE => {
-                    println!("  active={}", (blob.try_into() as Result<i8, _>).unwrap())
-                }
-                MessageAttr::NO_REPLY => {
-                    println!("  no_reply={}", (blob.try_into() as Result<i8, _>).unwrap())
-                }
-                //MessageAttr::SUBSCRIBERS => (),
-                MessageAttr::USER => {
-                    println!("  user={}", (blob.try_into() as Result<&str, _>).unwrap())
-                }
-                MessageAttr::GROUP => {
-                    println!("  group={}", (blob.try_into() as Result<&str, _>).unwrap())
-                }
-                unknown => println!("  unknown={:?}", unknown),
-            }
-        }
-    }
+                std::println!(")");
+            },
+        )
+        .unwrap();
 }
 
 // Data dumped from `ubus list`
-
 const TEST_HELLO: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, 0x2e, 0xb8, 0x63, 0xdb, 0x00, 0x00, 0x00, 0x04,
 ];
