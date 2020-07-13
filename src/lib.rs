@@ -57,10 +57,70 @@ macro_rules! values {
     };
 }
 
+macro_rules! invalid_data_panic {
+    ($($arg:tt)*) => (if cfg!(debug_assertions) { panic!($($arg)*); })
+}
+
+macro_rules! valid_data {
+    (($left:expr) >= ($right:expr), $msg:literal) => {{
+        if !(($left) >= ($right)) {
+            invalid_data_panic!("Invalid Data: {} ({:?} < {:?})", $msg, $left, $right);
+            return Err(Error::InvalidData($msg));
+        }
+    }};
+    (($left:expr) == ($right:expr), $msg:literal) => {{
+        if !(($left) == ($right)) {
+            invalid_data_panic!("Invalid Data: {} ({:?} != {:?})", $msg, $left, $right);
+            return Err(Error::InvalidData($msg));
+        }
+    }};
+    ($thing:expr, $msg:literal) => {{
+        if !($thing) {
+            invalid_data_panic!("Invalid Data: {}", $msg);
+            return Err(Error::InvalidData($msg));
+        }
+    }};
+}
+
+mod no {
+    #[derive(Debug)]
+    pub struct IO(());
+}
+
+#[derive(Debug)]
+pub enum Error<T = no::IO> {
+    IO(T),
+    InvalidData(&'static str),
+}
+
+impl<T: core::fmt::Debug> core::fmt::Display for Error<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        core::fmt::Debug::fmt(self, f)
+    }
+}
+
+impl<T> From<core::convert::Infallible> for Error<T> {
+    fn from(_: core::convert::Infallible) -> Self {
+        unreachable!()
+    }
+}
+
+impl<T: IOError> From<Error<no::IO>> for Error<T> {
+    fn from(e: Error<no::IO>) -> Self {
+        use Error::*;
+        match e {
+            IO(_) => unreachable!(),
+            InvalidData(v) => InvalidData(v),
+        }
+    }
+}
+
+pub trait IOError {}
+
 pub trait IO {
-    type Error;
-    fn put(&mut self, data: &[u8]) -> Result<(), Self::Error>;
-    fn get(&mut self, data: &mut [u8]) -> Result<(), Self::Error>;
+    type Error: IOError;
+    fn put(&mut self, data: &[u8]) -> Result<(), Error<Self::Error>>;
+    fn get(&mut self, data: &mut [u8]) -> Result<(), Error<Self::Error>>;
 }
 
 #[cfg(not(no_std))]

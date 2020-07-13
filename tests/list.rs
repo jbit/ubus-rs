@@ -1,6 +1,6 @@
 use core::convert::TryInto;
 use core::mem::{align_of, size_of};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::{print, println};
 use ubus::*;
@@ -18,7 +18,25 @@ fn test() {
 
     server.write_all(TEST_HELLO).unwrap();
 
-    let mut client = Connection::new(client).unwrap();
+    let mut connection = Connection::new(client).unwrap();
+
+    let mut buffer = [0u8; 1024];
+    let message = MessageBuilder::new(
+        &mut buffer,
+        MessageHeader {
+            version: MessageVersion::CURRENT,
+            message: MessageType::LOOKUP,
+            sequence: 1.into(),
+            peer: 0.into(),
+        },
+    )
+    .unwrap();
+
+    connection.send(message).unwrap();
+
+    let mut command = [0u8; 12];
+    server.read_exact(&mut command).unwrap();
+    assert_eq!(command, TEST_TX);
 
     std::thread::spawn(move || {
         for i in TEST_RX {
@@ -26,7 +44,7 @@ fn test() {
         }
     });
 
-    while let Ok(message) = client.next_message() {
+    while let Ok(message) = connection.next_message() {
         println!("{:?}", message);
         for blob in BlobIter::<Blob>::new(message.blob.data) {
             match blob.tag.id().into() {

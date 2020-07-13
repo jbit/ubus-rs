@@ -1,5 +1,5 @@
-use super::{Blob, BlobIter};
-use core::convert::TryInto;
+use super::{Blob, BlobIter, Error};
+use core::convert::{TryFrom, TryInto};
 use core::str;
 
 values!(pub BlobMsgType(u32) {
@@ -32,22 +32,23 @@ pub struct BlobMsg<'a> {
     pub data: BlobMsgData<'a>,
 }
 
-impl<'a> From<Blob<'a>> for BlobMsg<'a> {
-    fn from(blob: Blob<'a>) -> Self {
+impl<'a> TryFrom<Blob<'a>> for BlobMsg<'a> {
+    type Error = Error;
+    fn try_from(blob: Blob<'a>) -> Result<Self, Self::Error> {
         let data = match blob.tag.id().into() {
-            BlobMsgType::ARRAY => BlobMsgData::Array(BlobIter::new(blob.data)),
-            BlobMsgType::TABLE => BlobMsgData::Table(BlobIter::new(blob.data)),
-            BlobMsgType::STRING => BlobMsgData::String(blob.try_into().unwrap()),
-            BlobMsgType::INT64 => BlobMsgData::Int64(blob.try_into().unwrap()),
-            BlobMsgType::INT32 => BlobMsgData::Int32(blob.try_into().unwrap()),
-            BlobMsgType::INT16 => BlobMsgData::Int16(blob.try_into().unwrap()),
-            BlobMsgType::INT8 => BlobMsgData::Int8(blob.try_into().unwrap()),
+            BlobMsgType::ARRAY => BlobMsgData::Array(blob.try_into()?),
+            BlobMsgType::TABLE => BlobMsgData::Table(blob.try_into()?),
+            BlobMsgType::STRING => BlobMsgData::String(blob.try_into()?),
+            BlobMsgType::INT64 => BlobMsgData::Int64(blob.try_into()?),
+            BlobMsgType::INT32 => BlobMsgData::Int32(blob.try_into()?),
+            BlobMsgType::INT16 => BlobMsgData::Int16(blob.try_into()?),
+            BlobMsgType::INT8 => BlobMsgData::Int8(blob.try_into()?),
             id => BlobMsgData::Unknown(id, blob.data),
         };
-        BlobMsg {
+        Ok(BlobMsg {
             name: blob.name,
             data,
-        }
+        })
     }
 }
 impl core::fmt::Debug for BlobMsg<'_> {

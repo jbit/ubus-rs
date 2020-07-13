@@ -1,4 +1,4 @@
-use crate::{Blob, BlobTag, IO};
+use crate::{Blob, BlobTag, Error, IO};
 use core::convert::TryInto;
 use core::mem::{size_of, transmute};
 use storage_endian::{BEu16, BEu32};
@@ -68,7 +68,7 @@ pub struct Message<'a> {
 }
 
 impl<'a> Message<'a> {
-    pub fn from_io<T: IO>(io: &mut T, buffer: &'a mut [u8]) -> Result<Self, T::Error> {
+    pub fn from_io<T: IO>(io: &mut T, buffer: &'a mut [u8]) -> Result<Self, Error<T::Error>> {
         let (pre_buffer, buffer) = buffer.split_at_mut(MessageHeader::SIZE + BlobTag::SIZE);
 
         // Read in the message header and the following blob tag
@@ -77,10 +77,13 @@ impl<'a> Message<'a> {
         let (header, tag) = pre_buffer.split_at(MessageHeader::SIZE);
 
         let header = MessageHeader::from_bytes(header.try_into().unwrap());
-        assert_eq!(header.version, MessageVersion::CURRENT);
+        valid_data!(
+            (header.version) == (MessageVersion::CURRENT),
+            "Wrong version"
+        );
 
         let tag = BlobTag::from_bytes(tag.try_into().unwrap());
-        assert!(tag.is_valid());
+        tag.is_valid()?;
 
         // Get a slice the size of the blob's data bytes (do we need to worry about padding here?)
         let data = &mut buffer[..tag.inner_len()];
@@ -114,10 +117,11 @@ pub struct MessageBuilder<'a> {
 }
 
 impl<'a> MessageBuilder<'a> {
-    pub fn new(buffer: &'a mut [u8], header: MessageHeader) -> Result<Self, ()> {
-        if buffer.len() < MessageHeader::SIZE + BlobTag::SIZE {
-            return Err(());
-        }
+    pub fn new(buffer: &'a mut [u8], header: MessageHeader) -> Result<Self, Error> {
+        valid_data!(
+            (buffer.len()) >= (MessageHeader::SIZE + BlobTag::SIZE),
+            "Builder buffer is too small"
+        );
 
         let header_buf = &mut buffer[..MessageHeader::SIZE];
         let header_buf: &mut [u8; MessageHeader::SIZE] = header_buf.try_into().unwrap();

@@ -1,4 +1,4 @@
-use crate::{Message, MessageBuilder, MessageType, IO};
+use crate::*;
 
 pub struct Connection<T: IO> {
     io: T,
@@ -8,7 +8,7 @@ pub struct Connection<T: IO> {
 
 impl<T: IO> Connection<T> {
     /// Create a new ubus connection from an existing IO
-    pub fn new(io: T) -> Result<Self, T::Error> {
+    pub fn new(io: T) -> Result<Self, Error<T::Error>> {
         let mut new = Self {
             io,
             peer: 0,
@@ -19,7 +19,10 @@ impl<T: IO> Connection<T> {
         let message = new.next_message()?;
 
         // Verify the header is what we expect
-        assert_eq!(message.header.message, MessageType::HELLO);
+        valid_data!(
+            (message.header.message) == (MessageType::HELLO),
+            "Expected hello"
+        );
 
         // Record our peer id
         new.peer = message.header.peer.into();
@@ -28,11 +31,11 @@ impl<T: IO> Connection<T> {
     }
 
     // Get next message from ubus channel (blocking!)
-    pub fn next_message(&mut self) -> Result<Message, T::Error> {
+    pub fn next_message(&mut self) -> Result<Message, Error<T::Error>> {
         Message::from_io(&mut self.io, &mut self.buffer)
     }
 
-    pub fn send(&mut self, message: MessageBuilder) -> Result<(), T::Error> {
+    pub fn send(&mut self, message: MessageBuilder) -> Result<(), Error<T::Error>> {
         self.io.put(message.into())
     }
 }

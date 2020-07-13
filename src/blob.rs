@@ -1,4 +1,5 @@
-use core::convert::TryInto;
+use super::Error;
+use core::convert::{TryFrom, TryInto};
 use core::marker::PhantomData;
 use core::mem::{align_of, size_of, transmute};
 use core::str;
@@ -59,8 +60,9 @@ impl BlobTag {
         (self.0 & Self::EXTENDED_BIT) != 0
     }
     /// Does this blob look valid
-    pub fn is_valid(&self) -> bool {
-        self.size() >= Self::SIZE
+    pub fn is_valid(&self) -> Result<(), Error> {
+        valid_data!((self.size()) >= Self::SIZE, "Tag size smaller than tag");
+        Ok(())
     }
 }
 impl core::fmt::Debug for BlobTag {
@@ -79,10 +81,8 @@ pub struct Blob<'a> {
 }
 
 impl<'a> Blob<'a> {
-    pub fn from_bytes(data: &'a [u8]) -> Option<Self> {
-        if data.len() < BlobTag::SIZE {
-            return None;
-        }
+    pub fn from_bytes(data: &'a [u8]) -> Result<Self, Error> {
+        valid_data!((data.len()) >= (BlobTag::SIZE), "Blob too short");
         // Read the blob's tag
         let (tag, data) = data.split_at(BlobTag::SIZE);
         let tag = BlobTag::from_bytes(tag.try_into().unwrap());
@@ -90,10 +90,9 @@ impl<'a> Blob<'a> {
         Self::from_tag_and_data(tag, data)
     }
 
-    pub fn from_tag_and_data(tag: BlobTag, data: &'a [u8]) -> Option<Self> {
-        if !tag.is_valid() || (data.len() < tag.inner_len()) {
-            return None; // Actually an error!
-        }
+    pub fn from_tag_and_data(tag: BlobTag, data: &'a [u8]) -> Result<Self, Error> {
+        tag.is_valid()?;
+        valid_data!((data.len()) >= (tag.inner_len()), "Blob too short");
 
         // Restrict data to payload size
         let data = &data[..tag.inner_len()];
@@ -106,17 +105,24 @@ impl<'a> Blob<'a> {
             // Get the string
             let (ext_bytes, data) = data.split_at(ext_len);
             let name = str::from_utf8(ext_bytes).unwrap();
-            // Ensure the rest of the payload is aligned (+1 is for implicit nul terminator)
-            let ext_total = size_of::<u16>() + ext_len + 1;
+            // Get the nul terminator (implicit)
+            let ext_len = ext_len + 1;
+            let (terminator, data) = data.split_at(1);
+            valid_data!(
+                (terminator[0]) == (b'\0'),
+                "No extended name nul terminator"
+            );
+            // Ensure the rest of the payload is aligned
+            let ext_total = size_of::<u16>() + ext_len;
             let padding = BlobTag::ALIGNMENT.wrapping_sub(ext_total) & (BlobTag::ALIGNMENT - 1);
-            let data = &data[padding + 1..];
-            Some(Blob {
+            let data = &data[padding..];
+            Ok(Blob {
                 tag,
                 data,
                 name: Some(name),
             })
         } else {
-            Some(Blob {
+            Ok(Blob {
                 tag,
                 data,
                 name: None,
@@ -125,33 +131,49 @@ impl<'a> Blob<'a> {
     }
 }
 
-macro_rules! try_into_be {
-    ( $( $ty:ty , )* ) => { $( try_into_be!($ty); )* };
+macro_rules! try_into_number {
+    ( $( $ty:ty , )* ) => { $( try_into_number!($ty); )* };
     ( $ty:ty ) => {
         impl TryInto<$ty> for Blob<'_> {
-            type Error = Self;
+            type Error = Error;
             fn try_into(self) -> Result<$ty, Self::Error> {
                 let size = size_of::<$ty>();
                 if let Ok(bytes) = self.data[..size].try_into() {
                     Ok(<$ty>::from_be_bytes(bytes))
                 } else {
-                    Err(self)
+                    Err(Error::InvalidData(stringify!("Blob wrong size for " $ty)))
                 }
             }
         }
     };
 }
-try_into_be!(u8, i8, u16, i16, u32, i32, u64, i64, f64,);
+try_into_number!(u8, i8, u16, i16, u32, i32, u64, i64, f64,);
+impl<'a> TryInto<bool> for Blob<'a> {
+    type Error = Error;
+    fn try_into(self) -> Result<bool, Self::Error> {
+        let value: u8 = self.try_into()?;
+        Ok(value != 0)
+    }
+}
 impl<'a> TryInto<&'a str> for Blob<'a> {
-    type Error = core::str::Utf8Error;
+    type Error = Error;
     fn try_into(self) -> Result<&'a str, Self::Error> {
         let data = if self.data.last() == Some(&b'\0') {
             &self.data[..self.data.len() - 1]
         } else {
             self.data
         };
-
-        str::from_utf8(data)
+        str::from_utf8(data).map_err(|_| Error::InvalidData("Blob not valid UTF-8"))
+    }
+}
+impl<'a> Into<&'a [u8]> for Blob<'a> {
+    fn into(self) -> &'a [u8] {
+        self.data
+    }
+}
+impl<'a, T> Into<BlobIter<'a, T>> for Blob<'a> {
+    fn into(self) -> BlobIter<'a, T> {
+        BlobIter::new(self.data)
     }
 }
 
@@ -167,16 +189,20 @@ impl<'a, T> BlobIter<'a, T> {
         }
     }
 }
-impl<'a, T: From<Blob<'a>>> Iterator for BlobIter<'a, T> {
+impl<'a, T: TryFrom<Blob<'a>>> Iterator for BlobIter<'a, T> {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(blob) = Blob::from_bytes(self.data) {
+        if self.data.is_empty() {
+            return None;
+        }
+        if let Ok(blob) = Blob::from_bytes(self.data) {
             // Advance the internal pointer to the next tag
             self.data = &self.data[blob.tag.next_tag()..];
-            Some(blob.into())
-        } else {
-            None
+            if let Ok(blob) = blob.try_into() {
+                return Some(blob);
+            }
         }
+        None
     }
 }
 impl<T> core::fmt::Debug for BlobIter<'_, T> {
