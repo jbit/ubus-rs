@@ -1,4 +1,5 @@
 use core::convert::TryInto;
+use core::marker::PhantomData;
 use core::mem::{align_of, size_of, transmute};
 use core::str;
 use storage_endian::BEu32;
@@ -138,8 +139,6 @@ impl<'a> TryInto<&'a str> for Blob<'a> {
         str::from_utf8(data)
     }
 }
-
-use core::marker::PhantomData;
 
 pub struct BlobIter<'a, T> {
     data: &'a [u8],
