@@ -21,10 +21,11 @@ fn test() {
         }
     });
 
-    let mut buffer = [0u8; 64 * 1024];
-
-    while let Ok(message) = client.next_message(&mut buffer) {
+    while let Ok(message) = client.next_message() {
         std::dbg!(message);
+        for attr in message {
+            std::dbg!(attr);
+        }
     }
 }
 

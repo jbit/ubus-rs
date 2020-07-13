@@ -1,4 +1,4 @@
-use crate::BlobTag;
+use crate::{Blob, BlobIter, BlobTag};
 use core::mem::size_of;
 use storage_endian::{BEu16, BEu32};
 
@@ -88,7 +88,15 @@ impl Into<[u8; Self::SIZE]> for MessageHeader {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct Message {
+pub struct Message<'a> {
     pub header: MessageHeader,
-    pub data: (),
+    pub data: &'a [u8],
+}
+
+impl<'a> IntoIterator for Message<'a> {
+    type Item = Blob<'a>;
+    type IntoIter = BlobIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        BlobIter::new(self.data)
+    }
 }
