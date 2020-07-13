@@ -1,4 +1,4 @@
-use crate::{Message, MessageType, IO};
+use crate::{Message, MessageBuilder, MessageType, IO};
 
 pub struct Connection<T: IO> {
     io: T,
@@ -30,5 +30,9 @@ impl<T: IO> Connection<T> {
     // Get next message from ubus channel (blocking!)
     pub fn next_message(&mut self) -> Result<Message, T::Error> {
         Message::from_io(&mut self.io, &mut self.buffer)
+    }
+
+    pub fn send(&mut self, message: MessageBuilder) -> Result<(), T::Error> {
+        self.io.put(message.into())
     }
 }

@@ -15,9 +15,24 @@ impl BlobTag {
     const EXTENDED_BIT: u32 = 1 << 31;
     const ALIGNMENT: usize = align_of::<Self>();
 
+    pub fn new(id: u32, len: usize) -> Result<Self, ()> {
+        if id > Self::ID_MASK || len < Self::SIZE || len > Self::LEN_MASK as usize {
+            Err(())
+        } else {
+            let id = id & Self::ID_MASK;
+            let len = len as u32 & Self::LEN_MASK;
+            let val = len | (id << Self::ID_SHIFT);
+            Ok(Self(val.into()))
+        }
+    }
+
     /// Create BlobTag from a byte array
     pub fn from_bytes(bytes: [u8; Self::SIZE]) -> Self {
         unsafe { transmute(bytes) }
+    }
+    // Dump out bytes of MessageHeader
+    pub fn to_bytes(self) -> [u8; Self::SIZE] {
+        unsafe { core::mem::transmute(self) }
     }
     /// ID code of this blob
     pub fn id(&self) -> u32 {

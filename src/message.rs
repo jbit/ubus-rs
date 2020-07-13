@@ -59,29 +59,6 @@ impl MessageHeader {
     pub fn to_bytes(self) -> [u8; Self::SIZE] {
         unsafe { core::mem::transmute(self) }
     }
-
-    const OBJECT_EVENT: u32 = 1;
-    const OBJECT_ACL: u32 = 2;
-    const OBJECT_MONITOR: u32 = 3;
-
-    const MONITOR_CLIENT: u8 = 0x00;
-    const MONITOR_PEER: u8 = 0x01;
-    const MONITOR_SEND: u8 = 0x02;
-    const MONITOR_SEQ: u8 = 0x03;
-    const MONITOR_TYPE: u8 = 0x04;
-    const MONITOR_DATA: u8 = 0x05;
-
-    const STATUS_OK: u8 = 0x00;
-    const STATUS_INVALID_COMMAND: u8 = 0x01;
-    const STATUS_INVALID_ARGUMENT: u8 = 0x02;
-    const STATUS_METHOD_NOT_FOUND: u8 = 0x03;
-    const STATUS_NOT_FOUND: u8 = 0x04;
-    const STATUS_NO_DATA: u8 = 0x05;
-    const STATUS_PERMISSION_DENIED: u8 = 0x06;
-    const STATUS_TIMEOUT: u8 = 0x07;
-    const STATUS_NOT_SUPPORTED: u8 = 0x08;
-    const STATUS_UNKNOWN_ERROR: u8 = 0x09;
-    const STATUS_CONNECTION_FAILED: u8 = 0x0a;
 }
 
 #[derive(Copy, Clone)]
@@ -133,10 +110,36 @@ impl core::fmt::Debug for Message<'_> {
 
 pub struct MessageBuilder<'a> {
     buffer: &'a mut [u8],
+    offset: usize,
 }
 
 impl<'a> MessageBuilder<'a> {
-    pub fn new(buffer: &'a mut [u8]) -> Self {
-        Self { buffer }
+    pub fn new(buffer: &'a mut [u8], header: MessageHeader) -> Result<Self, ()> {
+        if buffer.len() < MessageHeader::SIZE + BlobTag::SIZE {
+            return Err(());
+        }
+
+        let header_buf = &mut buffer[..MessageHeader::SIZE];
+        let header_buf: &mut [u8; MessageHeader::SIZE] = header_buf.try_into().unwrap();
+        *header_buf = header.to_bytes();
+
+        let offset = MessageHeader::SIZE + BlobTag::SIZE;
+
+        Ok(Self { buffer, offset })
+    }
+
+    pub fn finish(self) -> &'a [u8] {
+        // Update tag with correct size
+        let tag = BlobTag::new(0, self.offset - MessageHeader::SIZE).unwrap();
+        let tag_buf = &mut self.buffer[MessageHeader::SIZE..MessageHeader::SIZE + BlobTag::SIZE];
+        let tag_buf: &mut [u8; BlobTag::SIZE] = tag_buf.try_into().unwrap();
+        *tag_buf = tag.to_bytes();
+
+        &self.buffer[..self.offset]
+    }
+}
+impl<'a> Into<&'a [u8]> for MessageBuilder<'a> {
+    fn into(self) -> &'a [u8] {
+        self.finish()
     }
 }
