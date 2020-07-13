@@ -1,9 +1,9 @@
-use super::*;
 use core::convert::TryInto;
 use core::mem::{align_of, size_of};
 use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::{print, println};
+use ubus::*;
 
 #[test]
 fn test() {
@@ -94,6 +94,8 @@ fn test() {
         }
     }
 }
+
+// Data dumped from `ubus list`
 
 const TEST_HELLO: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, 0x2e, 0xb8, 0x63, 0xdb, 0x00, 0x00, 0x00, 0x04,

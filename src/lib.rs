@@ -57,9 +57,6 @@ macro_rules! values {
     };
 }
 
-#[cfg(test)]
-mod test;
-
 #[cfg(not(no_std))]
 mod stdio;
 
