@@ -57,6 +57,12 @@ macro_rules! values {
     };
 }
 
+pub trait IO {
+    type Error;
+    fn put(&mut self, data: &[u8]) -> Result<(), Self::Error>;
+    fn get(&mut self, data: &mut [u8]) -> Result<(), Self::Error>;
+}
+
 #[cfg(not(no_std))]
 mod stdio;
 

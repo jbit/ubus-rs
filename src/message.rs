@@ -1,4 +1,5 @@
-use crate::Blob;
+use crate::{Blob, BlobTag, IO};
+use core::convert::TryInto;
 use core::mem::{size_of, transmute};
 use storage_endian::{BEu16, BEu32};
 
@@ -89,6 +90,34 @@ pub struct Message<'a> {
     pub blob: Blob<'a>,
 }
 
+impl<'a> Message<'a> {
+    pub fn from_io<T: IO>(io: &mut T, buffer: &'a mut [u8]) -> Result<Self, T::Error> {
+        let (pre_buffer, buffer) = buffer.split_at_mut(MessageHeader::SIZE + BlobTag::SIZE);
+
+        // Read in the message header and the following blob tag
+        io.get(pre_buffer)?;
+
+        let (header, tag) = pre_buffer.split_at(MessageHeader::SIZE);
+
+        let header = MessageHeader::from_bytes(header.try_into().unwrap());
+        assert_eq!(header.version, MessageVersion::CURRENT);
+
+        let tag = BlobTag::from_bytes(tag.try_into().unwrap());
+        assert!(tag.is_valid());
+
+        // Get a slice the size of the blob's data bytes (do we need to worry about padding here?)
+        let data = &mut buffer[..tag.inner_len()];
+
+        // Receive data into slice
+        io.get(data)?;
+
+        // Create the blob from our parts
+        let blob = Blob::from_tag_and_data(tag, data).unwrap();
+
+        Ok(Message { header, blob })
+    }
+}
+
 impl core::fmt::Debug for Message<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         write!(
@@ -99,5 +128,15 @@ impl core::fmt::Debug for Message<'_> {
             self.header.peer,
             self.blob.data.len()
         )
+    }
+}
+
+pub struct MessageBuilder<'a> {
+    buffer: &'a mut [u8],
+}
+
+impl<'a> MessageBuilder<'a> {
+    pub fn new(buffer: &'a mut [u8]) -> Self {
+        Self { buffer }
     }
 }
