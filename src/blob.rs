@@ -1,18 +1,7 @@
 use core::convert::TryInto;
 use core::mem::{align_of, size_of, transmute};
+use core::str;
 use storage_endian::BEu32;
-
-values!(pub BlobId(u8) {
-    UNSPEC  = 0x00,
-    NESTED  = 0x01,
-    BINARY  = 0x02,
-    STRING  = 0x03,
-    INT8    = 0x04,
-    INT16   = 0x05,
-    INT32   = 0x06,
-    INT64   = 0x07,
-    DOUBLE  = 0x08,
-});
 
 #[repr(transparent)]
 #[derive(Copy, Clone)]
@@ -33,19 +22,19 @@ impl BlobTag {
         u32::from((self.0 >> Self::ID_SHIFT) & Self::ID_MASK)
     }
     /// Total number of bytes this blob contains (header + data)
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         u32::from(self.0 & Self::LEN_MASK) as usize
     }
     /// Number of padding bytes between this blob and the next blob
     fn padding(&self) -> usize {
-        Self::ALIGNMENT.wrapping_sub(self.data_len()) & (Self::ALIGNMENT - 1)
+        Self::ALIGNMENT.wrapping_sub(self.len()) & (Self::ALIGNMENT - 1)
     }
     /// Number of bytes to the next tag
     fn next_tag(&self) -> usize {
         self.len() + self.padding()
     }
-    /// Total number of bytes in the payload
-    pub fn data_len(&self) -> usize {
+    /// Total number of bytes following the tag (extended header + data)
+    pub fn inner_len(&self) -> usize {
         self.len().saturating_sub(Self::SIZE)
     }
     /// Is this an "extended" blob
@@ -59,9 +48,9 @@ impl BlobTag {
 }
 impl core::fmt::Debug for BlobTag {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        let (id, data_len) = (self.id(), self.data_len());
+        let (id, len) = (self.id(), self.len());
         let extended = if self.is_extended() { ", extended" } else { "" };
-        write!(f, "BlobTag(id={:?}, data_len={}{})", id, data_len, extended)
+        write!(f, "BlobTag(id={:?}, len={}{})", id, len, extended)
     }
 }
 
@@ -69,6 +58,80 @@ impl core::fmt::Debug for BlobTag {
 pub struct Blob<'a> {
     pub tag: BlobTag,
     pub data: &'a [u8],
+    pub name: Option<&'a str>,
+}
+
+impl<'a> Blob<'a> {
+    fn from_bytes(data: &'a [u8]) -> Option<Self> {
+        if data.len() < BlobTag::SIZE {
+            return None;
+        }
+
+        // Read the blob's tag
+        let (tag, data) = data.split_at(BlobTag::SIZE);
+        let tag = BlobTag::from_bytes(tag.try_into().unwrap());
+        if !tag.is_valid() || (data.len() < tag.inner_len()) {
+            return None; // Actually an error!
+        }
+
+        // Restrict data to payload size
+        let data = &data[..tag.inner_len()];
+
+        if tag.is_extended() {
+            // Extended blobs have a name at the beginning
+            // Get the string length
+            let (len_bytes, data) = data.split_at(size_of::<u16>());
+            let ext_len = u16::from_be_bytes(len_bytes.try_into().unwrap()) as usize;
+            // Get the string
+            let (ext_bytes, data) = data.split_at(ext_len);
+            let name = str::from_utf8(ext_bytes).unwrap();
+            // Ensure the rest of the payload is aligned (+1 is for implicit nul terminator)
+            let ext_total = size_of::<u16>() + ext_len + 1;
+            let padding = BlobTag::ALIGNMENT.wrapping_sub(ext_total) & (BlobTag::ALIGNMENT - 1);
+            let data = &data[padding + 1..];
+            Some(Blob {
+                tag,
+                data,
+                name: Some(name),
+            })
+        } else {
+            Some(Blob {
+                tag,
+                data,
+                name: None,
+            })
+        }
+    }
+}
+
+macro_rules! try_into_be {
+    ( $( $ty:ty , )* ) => { $( try_into_be!($ty); )* };
+    ( $ty:ty ) => {
+        impl TryInto<$ty> for Blob<'_> {
+            type Error = Self;
+            fn try_into(self) -> Result<$ty, Self::Error> {
+                let size = size_of::<$ty>();
+                if let Ok(bytes) = self.data[..size].try_into() {
+                    Ok(<$ty>::from_be_bytes(bytes))
+                } else {
+                    Err(self)
+                }
+            }
+        }
+    };
+}
+try_into_be!(u8, i8, u16, i16, u32, i32, u64, i64, f64,);
+impl<'a> TryInto<&'a str> for Blob<'a> {
+    type Error = core::str::Utf8Error;
+    fn try_into(self) -> Result<&'a str, Self::Error> {
+        let data = if self.data.last() == Some(&b'\0') {
+            &self.data[..self.data.len() - 1]
+        } else {
+            self.data
+        };
+
+        str::from_utf8(data)
+    }
 }
 
 pub struct BlobIter<'a> {
@@ -82,20 +145,17 @@ impl<'a> BlobIter<'a> {
 impl<'a> Iterator for BlobIter<'a> {
     type Item = Blob<'a>;
     fn next(&mut self) -> Option<Blob<'a>> {
-        if self.data.len() < 4 {
-            return None;
+        if let Some(blob) = Blob::from_bytes(self.data) {
+            // Advance the internal pointer to the next tag
+            self.data = &self.data[blob.tag.next_tag()..];
+            Some(blob)
+        } else {
+            None
         }
-
-        // Read the blob's tag
-        let bytes = self.data[..BlobTag::SIZE].try_into().unwrap();
-        let tag = BlobTag::from_bytes(bytes);
-
-        // Get data slice
-        let data = &self.data[BlobTag::SIZE..BlobTag::SIZE + tag.data_len()];
-
-        // Advance the internal pointer
-        self.data = &self.data[tag.next_tag()..];
-
-        Some(Blob { tag, data })
+    }
+}
+impl core::fmt::Debug for BlobIter<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "BlobIter")
     }
 }

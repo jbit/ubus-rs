@@ -1,7 +1,9 @@
 use super::*;
+use core::convert::TryInto;
 use core::mem::{align_of, size_of};
 use std::io::Write;
 use std::os::unix::net::UnixStream;
+use std::{print, println};
 
 #[test]
 fn test() {
@@ -22,9 +24,70 @@ fn test() {
     });
 
     while let Ok(message) = client.next_message() {
-        std::dbg!(message);
-        for attr in message {
-            std::dbg!(attr);
+        println!("{:?}", message);
+        for blob in message {
+            match blob.tag.id().into() {
+                //MessageAttr::UNSPEC      => (),
+                MessageAttr::STATUS => {
+                    println!("  status={}", (blob.try_into() as Result<i32, _>).unwrap())
+                }
+                MessageAttr::OBJPATH => println!(
+                    "  objpath={:?}",
+                    (blob.try_into() as Result<&str, _>).unwrap()
+                ),
+                MessageAttr::OBJID => println!(
+                    "  objid={:08x}",
+                    (blob.try_into() as Result<u32, _>).unwrap()
+                ),
+                MessageAttr::METHOD => {
+                    println!("  method={}", (blob.try_into() as Result<&str, _>).unwrap())
+                }
+                MessageAttr::OBJTYPE => println!(
+                    "  objtype={:08x}",
+                    (blob.try_into() as Result<u32, _>).unwrap()
+                ),
+                MessageAttr::SIGNATURE => {
+                    println!("  signatures:");
+                    for signature in BlobMsgIter::new(blob.data) {
+                        print!("    {}( ", signature.name.unwrap());
+                        if let BlobMsgData::Table(table) = signature.data {
+                            for arg in table {
+                                if let BlobMsgData::Int32(typeid) = arg.data {
+                                    print!(
+                                        "{}: {:?}, ",
+                                        arg.name.unwrap(),
+                                        BlobMsgType::from(typeid as u32)
+                                    );
+                                } else {
+                                    print!("{:?}", arg);
+                                }
+                            }
+                        } else {
+                            print!("{:?}", signature.data);
+                        }
+                        println!(")")
+                    }
+                }
+                //MessageAttr::DATA        => (),
+                MessageAttr::TARGET => println!(
+                    "  target={:08x}",
+                    (blob.try_into() as Result<u32, _>).unwrap()
+                ),
+                MessageAttr::ACTIVE => {
+                    println!("  active={}", (blob.try_into() as Result<i8, _>).unwrap())
+                }
+                MessageAttr::NO_REPLY => {
+                    println!("  no_reply={}", (blob.try_into() as Result<i8, _>).unwrap())
+                }
+                //MessageAttr::SUBSCRIBERS => (),
+                MessageAttr::USER => {
+                    println!("  user={}", (blob.try_into() as Result<&str, _>).unwrap())
+                }
+                MessageAttr::GROUP => {
+                    println!("  group={}", (blob.try_into() as Result<&str, _>).unwrap())
+                }
+                unknown => println!("  unknown={:?}", unknown),
+            }
         }
     }
 }

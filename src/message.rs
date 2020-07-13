@@ -21,7 +21,7 @@ values!(pub MessageType(u8) {
     MONITOR         = 0x11,
 });
 
-values!(pub MessageAttr(u8) {
+values!(pub MessageAttr(u32) {
     UNSPEC      = 0x00,
     STATUS      = 0x01,
     OBJPATH     = 0x02,
@@ -87,7 +87,7 @@ impl Into<[u8; Self::SIZE]> for MessageHeader {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub struct Message<'a> {
     pub header: MessageHeader,
     pub data: &'a [u8],
@@ -98,5 +98,18 @@ impl<'a> IntoIterator for Message<'a> {
     type IntoIter = BlobIter<'a>;
     fn into_iter(self) -> Self::IntoIter {
         BlobIter::new(self.data)
+    }
+}
+
+impl core::fmt::Debug for Message<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(
+            f,
+            "Message({:?} seq={} peer={:08x}, len={})",
+            self.header.message,
+            self.header.sequence,
+            self.header.peer,
+            self.header.tag.len()
+        )
     }
 }

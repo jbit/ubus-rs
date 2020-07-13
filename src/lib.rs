@@ -26,6 +26,11 @@ macro_rules! values {
                 self.0
             }
         }
+        impl From<$repr> for $name {
+            fn from(other: $repr) -> Self {
+                Self(other)
+            }
+        }
         impl core::fmt::Debug for $name {
             fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
                 match *self {
@@ -80,15 +85,12 @@ impl<T: IO> Connection<T> {
         assert!(header.tag.is_valid());
 
         // Truncate slice to length of data
-        let buffer = &mut self.buffer[0..header.tag.data_len()];
+        let data = &mut self.buffer[..header.tag.inner_len()];
 
         // Receive data into slice
-        self.io.get(buffer)?;
+        self.io.get(data)?;
 
-        Ok(Message {
-            header,
-            data: buffer,
-        })
+        Ok(Message { header, data })
     }
 }
 
@@ -99,7 +101,9 @@ mod test;
 mod stdio;
 
 mod blob;
+mod blobmsg;
 mod message;
 
 pub use blob::*;
+pub use blobmsg::*;
 pub use message::*;
