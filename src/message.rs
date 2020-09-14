@@ -1,4 +1,4 @@
-use crate::{Blob, BlobIter, BlobMsg, BlobTag, Error, IO};
+use crate::{Blob, BlobBuilder, BlobIter, BlobMsg, BlobTag, Error, IO};
 use core::convert::TryInto;
 use core::mem::{size_of, transmute};
 use storage_endian::{BEu16, BEu32};
@@ -77,10 +77,7 @@ impl<'a> Message<'a> {
         let (header, tag) = pre_buffer.split_at(MessageHeader::SIZE);
 
         let header = MessageHeader::from_bytes(header.try_into().unwrap());
-        valid_data!(
-            (header.version) == (MessageVersion::CURRENT),
-            "Wrong version"
-        );
+        valid_data!(header.version == MessageVersion::CURRENT, "Wrong version");
 
         let tag = BlobTag::from_bytes(tag.try_into().unwrap());
         tag.is_valid()?;
@@ -119,7 +116,7 @@ pub struct MessageBuilder<'a> {
 impl<'a> MessageBuilder<'a> {
     pub fn new(buffer: &'a mut [u8], header: MessageHeader) -> Result<Self, Error> {
         valid_data!(
-            (buffer.len()) >= (MessageHeader::SIZE + BlobTag::SIZE),
+            buffer.len() >= (MessageHeader::SIZE + BlobTag::SIZE),
             "Builder buffer is too small"
         );
 
@@ -130,6 +127,31 @@ impl<'a> MessageBuilder<'a> {
         let offset = MessageHeader::SIZE + BlobTag::SIZE;
 
         Ok(Self { buffer, offset })
+    }
+
+    pub fn put(&mut self, attr: MessageAttr) -> Result<(), Error> {
+        let mut blob = BlobBuilder::from_bytes(&mut self.buffer[self.offset..]);
+
+        match attr {
+            MessageAttr::Status(val) => blob.push_u32(MessageAttrId::STATUS.value(), val as u32)?,
+            MessageAttr::ObjPath(val) => blob.push_str(MessageAttrId::OBJPATH.value(), val)?,
+            MessageAttr::ObjId(val) => blob.push_u32(MessageAttrId::OBJID.value(), val)?,
+            MessageAttr::Method(val) => blob.push_str(MessageAttrId::METHOD.value(), val)?,
+            MessageAttr::ObjType(val) => blob.push_u32(MessageAttrId::STATUS.value(), val)?,
+            MessageAttr::Signature(_) => unimplemented!(),
+            MessageAttr::Data(val) => blob.push_bytes(MessageAttrId::DATA.value(), val)?,
+            MessageAttr::Target(val) => blob.push_u32(MessageAttrId::TARGET.value(), val)?,
+            MessageAttr::Active(val) => blob.push_bool(MessageAttrId::USER.value(), val)?,
+            MessageAttr::NoReply(val) => blob.push_bool(MessageAttrId::USER.value(), val)?,
+            MessageAttr::Subscribers(_) => unimplemented!(),
+            MessageAttr::User(val) => blob.push_str(MessageAttrId::USER.value(), val)?,
+            MessageAttr::Group(val) => blob.push_str(MessageAttrId::GROUP.value(), val)?,
+            MessageAttr::Unknown(id, val) => blob.push_bytes(id.value(), val)?,
+        };
+
+        self.offset += blob.len();
+
+        Ok(())
     }
 
     pub fn finish(self) -> &'a [u8] {

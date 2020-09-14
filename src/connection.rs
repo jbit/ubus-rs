@@ -40,7 +40,7 @@ impl<T: IO> Connection<T> {
 
         // Verify the header is what we expect
         valid_data!(
-            (message.header.message) == (MessageType::HELLO),
+            message.header.message == MessageType::HELLO,
             "Expected hello"
         );
 
@@ -57,6 +57,68 @@ impl<T: IO> Connection<T> {
 
     pub fn send(&mut self, message: MessageBuilder) -> Result<(), Error<T::Error>> {
         self.io.put(message.into())
+    }
+
+    pub fn invoke(
+        &mut self,
+        obj: u32,
+        method: &str,
+        args: &[BlobMsgData],
+        mut on_result: impl FnMut(BlobIter<BlobMsg>),
+    ) -> Result<(), Error<T::Error>> {
+        self.sequence += 1;
+        let sequence = self.sequence.into();
+
+        let mut buffer = [0u8; 1024];
+        let mut message = MessageBuilder::new(
+            &mut buffer,
+            MessageHeader {
+                version: MessageVersion::CURRENT,
+                message: MessageType::INVOKE,
+                sequence,
+                peer: obj.into(),
+            },
+        )
+        .unwrap();
+
+        message.put(MessageAttr::ObjId(obj))?;
+        message.put(MessageAttr::Method(method))?;
+        message.put(MessageAttr::Data(&[]))?;
+
+        self.send(message)?;
+        'message: loop {
+            let message = self.next_message()?;
+            if message.header.sequence != sequence {
+                continue;
+            }
+
+            let attrs = BlobIter::<MessageAttr>::new(message.blob.data);
+
+            match message.header.message {
+                MessageType::STATUS => {
+                    for attr in attrs {
+                        if let MessageAttr::Status(0) = attr {
+                            return Ok(());
+                        } else if let MessageAttr::Status(status) = attr {
+                            return Err(Error::Status(status));
+                        }
+                    }
+                    return Err(Error::InvalidData("Invalid status message"));
+                }
+                MessageType::DATA => {
+                    for attr in attrs {
+                        if let MessageAttr::Data(data) = attr {
+                            on_result(BlobIter::<BlobMsg>::new(data));
+                            continue 'message;
+                        }
+                    }
+                    return Err(Error::InvalidData("Invalid data message"));
+                }
+                unknown => {
+                    std::dbg!(unknown);
+                }
+            }
+        }
     }
 
     pub fn lookup(
@@ -87,18 +149,17 @@ impl<T: IO> Connection<T> {
                 continue;
             }
 
-            let mut attrs = BlobIter::<MessageAttr>::new(message.blob.data);
+            let attrs = BlobIter::<MessageAttr>::new(message.blob.data);
 
             if message.header.message == MessageType::STATUS {
-                if let Some(MessageAttr::Status(status)) = attrs.next() {
-                    if status == 0 {
+                for attr in attrs {
+                    if let MessageAttr::Status(0) = attr {
                         return Ok(());
-                    } else {
+                    } else if let MessageAttr::Status(status) = attr {
                         return Err(Error::Status(status));
                     }
-                } else {
-                    return Err(Error::InvalidData("Invalid status message"));
                 }
+                return Err(Error::InvalidData("Invalid status message"));
             }
 
             if message.header.message != MessageType::DATA {

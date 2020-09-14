@@ -16,9 +16,9 @@ impl BlobTag {
     const EXTENDED_BIT: u32 = 1 << 31;
     const ALIGNMENT: usize = align_of::<Self>();
 
-    pub fn new(id: u32, len: usize) -> Result<Self, ()> {
+    pub fn new(id: u32, len: usize) -> Result<Self, Error> {
         if id > Self::ID_MASK || len < Self::SIZE || len > Self::LEN_MASK as usize {
-            Err(())
+            Err(Error::InvalidData("Invalid TAG construction"))
         } else {
             let id = id & Self::ID_MASK;
             let len = len as u32 & Self::LEN_MASK;
@@ -61,7 +61,7 @@ impl BlobTag {
     }
     /// Does this blob look valid
     pub fn is_valid(&self) -> Result<(), Error> {
-        valid_data!((self.size()) >= Self::SIZE, "Tag size smaller than tag");
+        valid_data!(self.size() >= Self::SIZE, "Tag size smaller than tag");
         Ok(())
     }
 }
@@ -70,6 +70,63 @@ impl core::fmt::Debug for BlobTag {
         let (id, len) = (self.id(), self.size());
         let extended = if self.is_extended() { ", extended" } else { "" };
         write!(f, "BlobTag(id={:?}, len={}{})", id, len, extended)
+    }
+}
+
+pub struct BlobBuilder<'a> {
+    buffer: &'a mut [u8],
+    offset: usize,
+}
+
+impl<'a> BlobBuilder<'a> {
+    pub fn from_bytes(buffer: &'a mut [u8]) -> Self {
+        Self { buffer, offset: 0 }
+    }
+
+    pub fn push_u32(&mut self, id: u32, data: u32) -> Result<(), Error> {
+        self.push_bytes(id, &data.to_be_bytes())
+    }
+
+    pub fn push_bool(&mut self, id: u32, data: bool) -> Result<(), Error> {
+        self.push_bytes(id, if data { &[1] } else { &[0] })
+    }
+
+    pub fn push_str(&mut self, id: u32, data: &str) -> Result<(), Error> {
+        self.push_bytes(id, data.as_bytes().iter().chain([0u8].iter()))
+    }
+
+    pub fn push_bytes<'b>(
+        &mut self,
+        id: u32,
+        data: impl IntoIterator<Item = &'b u8>,
+    ) -> Result<(), Error> {
+        let iter = data.into_iter();
+        let buffer = &mut self.buffer[self.offset..];
+
+        let mut len = BlobTag::SIZE;
+        for b in iter {
+            if len >= buffer.len() {
+                return Err(Error::InvalidData("BlobBuilder overflow!"));
+            }
+            buffer[len] = *b;
+            len += 1;
+        }
+
+        let tag = BlobTag::new(id, len)?;
+        let pad = tag.padding();
+        buffer[..4].copy_from_slice(&tag.to_bytes());
+
+        self.offset += len + pad;
+
+        Ok(())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn len(&self) -> usize {
+        self.offset
     }
 }
 
@@ -82,7 +139,7 @@ pub struct Blob<'a> {
 
 impl<'a> Blob<'a> {
     pub fn from_bytes(data: &'a [u8]) -> Result<Self, Error> {
-        valid_data!((data.len()) >= (BlobTag::SIZE), "Blob too short");
+        valid_data!(data.len() >= BlobTag::SIZE, "Blob too short");
         // Read the blob's tag
         let (tag, data) = data.split_at(BlobTag::SIZE);
         let tag = BlobTag::from_bytes(tag.try_into().unwrap());
@@ -92,7 +149,7 @@ impl<'a> Blob<'a> {
 
     pub fn from_tag_and_data(tag: BlobTag, data: &'a [u8]) -> Result<Self, Error> {
         tag.is_valid()?;
-        valid_data!((data.len()) >= (tag.inner_len()), "Blob too short");
+        valid_data!(data.len() >= tag.inner_len(), "Blob too short");
 
         // Restrict data to payload size
         let data = &data[..tag.inner_len()];
@@ -108,10 +165,7 @@ impl<'a> Blob<'a> {
             // Get the nul terminator (implicit)
             let ext_len = ext_len + 1;
             let (terminator, data) = data.split_at(1);
-            valid_data!(
-                (terminator[0]) == (b'\0'),
-                "No extended name nul terminator"
-            );
+            valid_data!(terminator[0] == b'\0', "No extended name nul terminator");
             // Ensure the rest of the payload is aligned
             let ext_total = size_of::<u16>() + ext_len;
             let padding = BlobTag::ALIGNMENT.wrapping_sub(ext_total) & (BlobTag::ALIGNMENT - 1);
