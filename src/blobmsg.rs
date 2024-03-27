@@ -36,8 +36,8 @@ impl<'a> TryFrom<Blob<'a>> for BlobMsg<'a> {
     type Error = Error;
     fn try_from(blob: Blob<'a>) -> Result<Self, Self::Error> {
         let data = match blob.tag.id().into() {
-            BlobMsgType::ARRAY => BlobMsgData::Array(blob.try_into()?),
-            BlobMsgType::TABLE => BlobMsgData::Table(blob.try_into()?),
+            BlobMsgType::ARRAY => BlobMsgData::Array(blob.into()),
+            BlobMsgType::TABLE => BlobMsgData::Table(blob.into()),
             BlobMsgType::STRING => BlobMsgData::String(blob.try_into()?),
             BlobMsgType::INT64 => BlobMsgData::Int64(blob.try_into()?),
             BlobMsgType::INT32 => BlobMsgData::Int32(blob.try_into()?),

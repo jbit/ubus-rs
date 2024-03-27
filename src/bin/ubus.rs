@@ -3,7 +3,7 @@ use std::path::Path;
 fn main() {
     let socket = Path::new("/var/run/ubus.sock");
 
-    let mut connection = match ubus::Connection::connect(&socket) {
+    let mut connection = match ubus::Connection::connect(socket) {
         Ok(connection) => connection,
         Err(err) => {
             eprintln!("{}: Failed to open ubus socket. {}", socket.display(), err);
