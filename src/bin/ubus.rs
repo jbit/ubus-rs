@@ -1,8 +1,7 @@
 use std::path::Path;
 
 fn main() {
-    let socket = Path::new("/var/run/ubus.sock");
-
+    let socket = Path::new("/var/run/ubus/ubus.sock");
     let mut connection = match ubus::Connection::connect(&socket) {
         Ok(connection) => connection,
         Err(err) => {
