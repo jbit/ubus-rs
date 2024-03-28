@@ -63,7 +63,7 @@ impl<T: IO> Connection<T> {
         &mut self,
         obj: u32,
         method: &str,
-        args: &[BlobMsgData],
+        _args: &[BlobMsgData],
         mut on_result: impl FnMut(BlobIter<BlobMsg>),
     ) -> Result<(), Error<T::Error>> {
         self.sequence += 1;
