@@ -1,3 +1,5 @@
+![Rust](https://github.com/SimonTate/ubus-rs/actions/workflows/rust.yml/badge.svg)
+
 ubus (Rust)
 ===========
 
