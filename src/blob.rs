@@ -220,14 +220,14 @@ impl<'a> TryInto<&'a str> for Blob<'a> {
         str::from_utf8(data).map_err(|_| Error::InvalidData("Blob not valid UTF-8"))
     }
 }
-impl<'a> Into<&'a [u8]> for Blob<'a> {
-    fn into(self) -> &'a [u8] {
-        self.data
+impl<'a> From<Blob<'a>> for &'a [u8] {
+    fn from(val: Blob<'a>) -> Self {
+        val.data
     }
 }
-impl<'a, T> Into<BlobIter<'a, T>> for Blob<'a> {
-    fn into(self) -> BlobIter<'a, T> {
-        BlobIter::new(self.data)
+impl<'a, T> From<Blob<'a>> for BlobIter<'a, T> {
+    fn from(val: Blob<'a>) -> Self {
+        BlobIter::new(val.data)
     }
 }
 

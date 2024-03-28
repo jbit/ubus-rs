@@ -164,9 +164,9 @@ impl<'a> MessageBuilder<'a> {
         &self.buffer[..self.offset]
     }
 }
-impl<'a> Into<&'a [u8]> for MessageBuilder<'a> {
-    fn into(self) -> &'a [u8] {
-        self.finish()
+impl<'a> From<MessageBuilder<'a>> for &'a [u8] {
+    fn from(val: MessageBuilder<'a>) -> Self {
+        val.finish()
     }
 }
 
@@ -196,12 +196,12 @@ impl<'a> From<Blob<'a>> for MessageAttr<'a> {
             MessageAttrId::OBJID => MessageAttr::ObjId(blob.try_into().unwrap()),
             MessageAttrId::METHOD => MessageAttr::Method(blob.try_into().unwrap()),
             MessageAttrId::OBJTYPE => MessageAttr::ObjType(blob.try_into().unwrap()),
-            MessageAttrId::SIGNATURE => MessageAttr::Signature(blob.try_into().unwrap()),
-            MessageAttrId::DATA => MessageAttr::Data(blob.try_into().unwrap()),
+            MessageAttrId::SIGNATURE => MessageAttr::Signature(blob.into()),
+            MessageAttrId::DATA => MessageAttr::Data(blob.into()),
             MessageAttrId::TARGET => MessageAttr::Target(blob.try_into().unwrap()),
             MessageAttrId::ACTIVE => MessageAttr::Active(blob.try_into().unwrap()),
             MessageAttrId::NO_REPLY => MessageAttr::NoReply(blob.try_into().unwrap()),
-            MessageAttrId::SUBSCRIBERS => MessageAttr::Subscribers(blob.try_into().unwrap()),
+            MessageAttrId::SUBSCRIBERS => MessageAttr::Subscribers(blob.into()),
             MessageAttrId::USER => MessageAttr::User(blob.try_into().unwrap()),
             MessageAttrId::GROUP => MessageAttr::Group(blob.try_into().unwrap()),
             id => MessageAttr::Unknown(id, blob.data),
