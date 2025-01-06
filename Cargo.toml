@@ -17,3 +17,6 @@ no_std = []
 
 [dependencies]
 storage_endian = { git = "https://github.com/jbit/storage_endian" }
+
+[[example]]
+name = "lookup"
